@@ -15,6 +15,12 @@ dist/
 *.egg-info/
 *.egg
 
+# Node / JS dependencies and builds
+node_modules/
+backend/node_modules/
+backend/dist/
+backend/build/
+
 # Logs and coverage
 *.log
 .coverage
