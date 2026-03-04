@@ -8,6 +8,16 @@ const io = new Server(server, {
 
 io.on("connection", (socket) => {
     console.log("Client connected:", socket.id);
+
+    // Incoming audio data chunks (streamed from client MediaRecorder every ~250ms)
+    socket.on("audio-chunk", (chunk) => {
+        const size = Buffer.isBuffer(chunk) ? chunk.length : (chunk?.byteLength ?? 0);
+        if (size > 0) {
+            // TODO: forward to Strands Agent (e.g. pipe into speech pipeline)
+            console.log("Audio chunk received:", size, "bytes");
+        }
+    });
+
     socket.on("disconnect", (reason) => {
         console.log("Client disconnected:", socket.id, reason);
     });
