@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nova Tempo</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <button id="enable-button">Enable Microphone</button>
+        <div id="output" hidden>Waiting for user to enable microphone...</div>
+
+        <button id="start-button">Start Conversation</button>
+        <button id="stop-button">Stop Conversation</button>
+
+        <div id="playback-container" hidden>
+            <p id="playback-label">Last recording</p>
+            <audio id="playback" controls></audio>
+        </div>
+    </div>
+        
+    
+    
+    <script src="https://cdn.socket.io/4.8.3/socket.io.min.js" integrity="sha384-kzavj5fiMwLKzzD1f8S7TeoVIEi7uKHvbTA3ueZkrzYq75pNQUiUi6Dy98Q3fxb0" crossorigin="anonymous"></script>
+    <script src="script.js"></script>
+</body>
+</html>
