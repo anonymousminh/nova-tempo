@@ -36,7 +36,11 @@ function enableMicrophone() {
             recorderMedia = new MediaRecorder(streamMedia);
 
             recorderMedia.addEventListener("dataavailable", (event) => {
-                if (event.data.size > 0) audioChunks.push(event.data);
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                    // Stream chunk to backend for Strands Agent
+                    if (socket.connected) socket.emit("audio-chunk", event.data);
+                }
             });
 
             recorderMedia.addEventListener("stop", () => {
@@ -68,7 +72,7 @@ function setupRecordingButtons() {
             return;
         }
         audioChunks.length = 0;
-        recorderMedia.start();
+        recorderMedia.start(250); // emit dataavailable every 250 ms
         output.textContent = "Recording…";
     });
 
