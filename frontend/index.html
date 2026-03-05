@@ -14,6 +14,13 @@
         <button id="start-button">Start Conversation</button>
         <button id="stop-button">Stop Conversation</button>
 
+        <div id="waveform-container">
+            <p class="waveform-label">Outgoing (mic)</p>
+            <canvas id="waveform-out" width="600" height="60"></canvas>
+            <p class="waveform-label">Incoming (echo)</p>
+            <canvas id="waveform-in" width="600" height="60"></canvas>
+        </div>
+
         <div id="playback-container" hidden>
             <p id="playback-label">Last recording</p>
             <audio id="playback" controls></audio>
