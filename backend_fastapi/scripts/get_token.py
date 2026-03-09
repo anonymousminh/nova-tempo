@@ -44,18 +44,29 @@ def main() -> None:
 
     creds = None
     if DEFAULT_TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(DEFAULT_TOKEN_FILE), SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(str(DEFAULT_TOKEN_FILE), SCOPES)
+        except Exception:
+            creds = None
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(client_path, SCOPES)
-            creds = flow.run_local_server(port=8085)
+            creds = flow.run_local_server(port=8085, prompt="consent")
         DEFAULT_TOKEN_FILE.write_text(creds.to_json())
         print(f"Saved: {DEFAULT_TOKEN_FILE}")
     else:
         print(f"Already have a valid token: {DEFAULT_TOKEN_FILE}")
+
+    if not creds or not creds.refresh_token:
+        print("WARNING: Token is missing refresh_token. Deleting and re-running OAuth flow...")
+        DEFAULT_TOKEN_FILE.unlink(missing_ok=True)
+        flow = InstalledAppFlow.from_client_secrets_file(client_path, SCOPES)
+        creds = flow.run_local_server(port=8085, prompt="consent")
+        DEFAULT_TOKEN_FILE.write_text(creds.to_json())
+        print(f"Saved: {DEFAULT_TOKEN_FILE}")
 
     print("Calendar auth is ready.")
 
