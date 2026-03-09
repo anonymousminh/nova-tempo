@@ -41,3 +41,8 @@ htmlcov/
 .env
 .env.*
 
+# Local credentials / tokens (never commit)
+backend_fastapi/secrets/
+backend_fastapi/token.json
+backend_fastapi/credentials.json
+
