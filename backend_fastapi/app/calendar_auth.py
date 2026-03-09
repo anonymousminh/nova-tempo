@@ -39,9 +39,18 @@ def get_calendar_service():
         return None
 
     try:
+        from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
 
         creds = Credentials.from_authorized_user_file(str(path), scopes=SCOPES)
+        if not creds.valid:
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                path.write_text(creds.to_json())
+                print("[Calendar] Token refreshed and saved.")
+            else:
+                print("[Calendar] Token invalid and cannot be refreshed. Re-run scripts/get_token.py")
+                return None
         _calendar_service = build_calendar_service(creds)
         return _calendar_service
     except Exception as e:
