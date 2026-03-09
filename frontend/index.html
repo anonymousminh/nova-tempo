@@ -8,27 +8,19 @@
 </head>
 <body>
     <div id="app">
-        <button id="enable-button">Enable Microphone</button>
-        <div id="output" hidden>Waiting for user to enable microphone...</div>
+        <h1>Nova Tempo</h1>
+        <p class="subtitle">Calendar Assistant</p>
 
-        <button id="start-button">Start Conversation</button>
-        <button id="stop-button">Stop Conversation</button>
+        <div id="chat-log"></div>
 
-        <div id="waveform-container">
-            <p class="waveform-label">Outgoing (mic)</p>
-            <canvas id="waveform-out" width="600" height="60"></canvas>
-            <p class="waveform-label">Incoming (echo)</p>
-            <canvas id="waveform-in" width="600" height="60"></canvas>
-        </div>
+        <form id="chat-form">
+            <input id="chat-input" type="text" placeholder="Ask about your schedule…" autocomplete="off" />
+            <button type="submit">Send</button>
+        </form>
 
-        <div id="playback-container" hidden>
-            <p id="playback-label">Last recording</p>
-            <audio id="playback" controls></audio>
-        </div>
+        <p class="hint">Or run <code>python bidi_agent_run.py</code> for voice mode.</p>
     </div>
-        
-    
-    
+
     <script src="https://cdn.socket.io/4.8.3/socket.io.min.js" integrity="sha384-kzavj5fiMwLKzzD1f8S7TeoVIEi7uKHvbTA3ueZkrzYq75pNQUiUi6Dy98Q3fxb0" crossorigin="anonymous"></script>
     <script src="script.js"></script>
 </body>
