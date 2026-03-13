@@ -8,7 +8,8 @@ Direct tool calls (REST + Socket.IO ``tool`` event) still go straight to
 the calendar tools for low-level / programmatic access.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from uuid import uuid4
 from fastapi.middleware.cors import CORSMiddleware
 import socketio
 
@@ -16,6 +17,7 @@ from .calendar_auth import get_calendar_service
 from .calendar_tools import (
     list_upcoming_events,
     create_calendar_event,
+    delete_calendar_event,
     find_free_slots,
 )
 
@@ -39,10 +41,25 @@ def _prepare_event(_service, **kw):
     }
 
 
+def _prepare_delete(_service, **kw):
+    _pending_direct_actions["event"] = {
+        "action": "delete",
+        "event_id": kw["event_id"],
+    }
+    return {
+        "status": "pending_confirmation",
+        "action": "delete",
+        "event_id": kw["event_id"],
+        "message": "Delete prepared. Call confirm_action to delete or cancel_action to discard.",
+    }
+
+
 def _confirm_event(_service, **_kw):
     if "event" not in _pending_direct_actions:
         raise ValueError("No pending action to confirm.")
     data = _pending_direct_actions.pop("event")
+    if data.get("action") == "delete":
+        return delete_calendar_event(_service, event_id=data["event_id"])
     return create_calendar_event(
         _service,
         summary=data["summary"],
@@ -73,6 +90,12 @@ BIDI_AGENT_TOOLS = [
         "description": "Prepare a calendar event (requires confirmation via confirm_action).",
         "parameters": ["summary", "start_time", "end_time", "description"],
         "runner": _prepare_event,
+    },
+    {
+        "name": "prepare_delete_event",
+        "description": "Prepare to delete a calendar event (requires confirmation via confirm_action).",
+        "parameters": ["event_id"],
+        "runner": _prepare_delete,
     },
     {
         "name": "confirm_action",
@@ -113,16 +136,22 @@ app.add_middleware(
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 combined_asgi_app = socketio.ASGIApp(sio, app)
 
+_sid_to_user: dict[str, str] = {}
+
 
 @sio.event
 async def connect(sid, environ, auth):
-    print(f"[Server] Client connected: {sid}")
+    user_id = (auth or {}).get("user_id") if isinstance(auth, dict) else None
+    if user_id:
+        _sid_to_user[sid] = user_id
+    print(f"[Server] Client connected: {sid}  user={user_id}")
 
 
 @sio.event
 async def disconnect(sid):
     from .voice_session import stop_voice
 
+    _sid_to_user.pop(sid, None)
     await stop_voice(sid)
     print(f"[Server] Client disconnected: {sid}")
 
@@ -135,9 +164,10 @@ async def on_voice_start(sid, payload=None):
     from .voice_session import start_voice
 
     try:
-        config = await start_voice(sio, sid)
+        user_id = _sid_to_user.get(sid)
+        config = await start_voice(sio, sid, user_id=user_id)
         await sio.emit("voice_started", config, to=sid)
-        print(f"[Voice] Session started for {sid}")
+        print(f"[Voice] Session started for {sid}  user={user_id}")
     except Exception as e:
         print(f"[Voice] Start error: {e}")
         await sio.emit("voice_error", {"error": str(e)}, to=sid)
@@ -226,3 +256,27 @@ async def agent_tool_call(payload: dict):
     if not name:
         return {"ok": False, "error": "Missing tool name"}
     return _run_agent_tool(name, params)
+
+
+# ---------------------------------------------------------------------------
+# Guest identity using cookie based session
+# ---------------------------------------------------------------------------
+COOKIE_NAME = "nova_user_id"
+
+@app.get("/id")
+async def get_nova_user_id(request: Request, response: Response):
+    # Read the existing cookie
+    nova_user_id = request.cookies.get(COOKIE_NAME)
+
+    # If it's missing, generate a new one and set the cookie
+    if not nova_user_id:
+        nova_user_id = f"nova_user_{str(uuid4())}"
+        response.set_cookie(
+            key=COOKIE_NAME,
+            value=nova_user_id,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+        )
+
+    return {"nova_user_id": nova_user_id}
