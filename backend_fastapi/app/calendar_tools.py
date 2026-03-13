@@ -12,6 +12,7 @@ __all__ = [
     "build_calendar_service",
     "list_upcoming_events",
     "create_calendar_event",
+    "delete_calendar_event",
     "find_free_slots",
 ]
 
@@ -97,6 +98,7 @@ def list_upcoming_events(
         end_str = end.get("dateTime") or end.get("date") or ""
         out.append(
             {
+                "id": ev.get("id", ""),
                 "title": ev.get("summary", "(No title)"),
                 "start": _to_local_friendly(start_str),
                 "end": _to_local_friendly(end_str),
@@ -123,6 +125,16 @@ def create_calendar_event(
         body["description"] = description
     event = service.events().insert(calendarId=calendar_id, body=body).execute()
     return event
+
+
+def delete_calendar_event(
+    service: CalendarService,
+    event_id: str,
+    calendar_id: str = PRIMARY_CALENDAR_ID,
+) -> dict[str, Any]:
+    """Delete a calendar event by its ID."""
+    service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+    return {"status": "deleted", "event_id": event_id}
 
 
 def find_free_slots(
