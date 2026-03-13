@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 import socketio
 
@@ -30,17 +32,30 @@ from strands.experimental.bidi.types.events import (
 from .calendar_auth import get_calendar_service
 from .orchestrator import get_orchestrator_tools, ORCHESTRATOR_SYSTEM_PROMPT
 
+try:
+    from bedrock_agentcore.memory.integrations.strands.config import (
+        AgentCoreMemoryConfig,
+    )
+    from bedrock_agentcore.memory.integrations.strands.session_manager import (
+        AgentCoreMemorySessionManager,
+    )
+    _MEMORY_AVAILABLE = True
+except ImportError:
+    _MEMORY_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
 class VoiceSession:
     """Manages a single BidiAgent voice session for a Socket.IO client."""
 
-    def __init__(self, sio: socketio.AsyncServer, sid: str) -> None:
+    def __init__(self, sio: socketio.AsyncServer, sid: str, user_id: str | None = None) -> None:
         self._sio = sio
         self._sid = sid
+        self._user_id = user_id
         self._agent: BidiAgent | None = None
         self._receive_task: asyncio.Task | None = None
+        self._memory_session_manager = None
 
     async def start(self) -> dict[str, Any]:
         """Create and start the BidiAgent. Returns audio config for the client."""
@@ -63,10 +78,13 @@ class VoiceSession:
             f'"tomorrow" means {(now + timedelta(days=1)).strftime("%Y-%m-%d")}.'
         )
 
+        session_manager = self._build_memory_session_manager()
+
         self._agent = BidiAgent(
             model=model,
             system_prompt=ORCHESTRATOR_SYSTEM_PROMPT + date_context,
             tools=[*orchestrator_tools, stop_conversation],
+            **({"session_manager": session_manager} if session_manager else {}),
         )
 
         await self._agent.start()
@@ -85,6 +103,36 @@ class VoiceSession:
             "channels": self._channels,
             "format": self._audio_format,
         }
+
+    def _build_memory_session_manager(self):
+        """Create an AgentCoreMemorySessionManager if memory is configured."""
+        memory_id = os.environ.get("BEDROCK_MEMORY_ID")
+        if not _MEMORY_AVAILABLE or not memory_id or not self._user_id:
+            if not _MEMORY_AVAILABLE:
+                logger.info("bedrock-agentcore not installed — memory disabled")
+            elif not memory_id:
+                logger.info("BEDROCK_MEMORY_ID not set — memory disabled")
+            elif not self._user_id:
+                logger.info("No user_id — memory disabled")
+            return None
+
+        region = os.environ.get("BEDROCK_MEMORY_REGION", "us-east-1")
+        session_id = f"{self._user_id}_{uuid4().hex[:8]}"
+
+        config = AgentCoreMemoryConfig(
+            memory_id=memory_id,
+            actor_id=self._user_id,
+            session_id=session_id,
+        )
+        self._memory_session_manager = AgentCoreMemorySessionManager(
+            agentcore_memory_config=config,
+            region_name=region,
+        )
+        logger.info(
+            "Memory enabled  memory=%s actor=%s session=%s",
+            memory_id, self._user_id, session_id,
+        )
+        return self._memory_session_manager
 
     async def send_audio(self, audio_b64: str) -> None:
         """Forward a base64 audio chunk from the browser to the BidiAgent."""
@@ -114,6 +162,14 @@ class VoiceSession:
             except Exception as e:
                 logger.warning("Error stopping BidiAgent: %s", e)
         self._agent = None
+
+        if self._memory_session_manager is not None:
+            try:
+                self._memory_session_manager.close()
+                logger.info("Memory session flushed and closed")
+            except Exception as e:
+                logger.warning("Error closing memory session: %s", e)
+            self._memory_session_manager = None
 
     async def _receive_loop(self) -> None:
         """Background task: read BidiAgent output events and emit via Socket.IO."""
@@ -170,8 +226,8 @@ class VoiceSession:
 _sessions: dict[str, VoiceSession] = {}
 
 
-async def start_voice(sio: socketio.AsyncServer, sid: str) -> dict[str, Any]:
-    session = VoiceSession(sio, sid)
+async def start_voice(sio: socketio.AsyncServer, sid: str, *, user_id: str | None = None) -> dict[str, Any]:
+    session = VoiceSession(sio, sid, user_id=user_id)
     _sessions[sid] = session
     return await session.start()
 

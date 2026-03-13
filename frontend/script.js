@@ -10,7 +10,20 @@ const isLocalDev =
   window.location.hostname === "localhost" ||
   window.location.hostname === "127.0.0.1";
 const BACKEND_URL = isLocalDev ? "http://localhost:8000" : window.location.origin;
-const socket = io(BACKEND_URL);
+
+let novaUserId = localStorage.getItem("nova_user_id");
+if (!novaUserId) {
+  novaUserId =
+    "nova_user_" +
+    (crypto.randomUUID
+      ? crypto.randomUUID()
+      : "xxxx-xxxx-xxxx".replace(/x/g, () =>
+          ((Math.random() * 16) | 0).toString(16)
+        ));
+  localStorage.setItem("nova_user_id", novaUserId);
+}
+
+const socket = io(BACKEND_URL, { auth: { user_id: novaUserId } });
 
 socket.on("connect", () => console.log("Socket connected:", socket.id));
 socket.on("disconnect", (reason) => {
