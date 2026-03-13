@@ -103,20 +103,26 @@ def get_calendar_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
         if "event" not in pending_actions:
             return json.dumps({"error": "No pending action to confirm."})
 
-        from .calendar_tools import create_calendar_event as _create
-
         event_data = pending_actions.pop("event")
         service = get_calendar_service()
         if service is None:
             return json.dumps({"error": "Calendar not configured. Check secrets/token.json."})
+
+        action = event_data.get("action", "create")
+
         try:
-            result = _create(
-                service,
-                summary=event_data["summary"],
-                start_time=event_data["start_time"],
-                end_time=event_data["end_time"],
-                description=event_data["description"],
-            )
+            if action == "delete":
+                from .calendar_tools import delete_calendar_event as _delete
+                result = _delete(service, event_id=event_data["event_id"])
+            else:
+                from .calendar_tools import create_calendar_event as _create
+                result = _create(
+                    service,
+                    summary=event_data["summary"],
+                    start_time=event_data["start_time"],
+                    end_time=event_data["end_time"],
+                    description=event_data["description"],
+                )
             return json.dumps(result, default=str)
         except Exception as e:
             print(f"[confirm_action] Error: {e}")
@@ -130,6 +136,29 @@ def get_calendar_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
             return json.dumps({"error": "No pending action to cancel."})
         pending_actions.pop("event")
         return json.dumps({"status": "cancelled", "message": "Pending action cancelled."})
+
+    @tool
+    def prepare_delete_event(event_id: str, event_title: str) -> str:
+        """Prepare to delete a calendar event. Returns details for the user to
+        review. The event is NOT deleted yet — call confirm_action after the user
+        approves, or cancel_action if they decline.
+
+        Args:
+            event_id: The Google Calendar event ID (from list_upcoming_events).
+            event_title: The title of the event (for display in the confirmation).
+        """
+        pending_actions["event"] = {
+            "action": "delete",
+            "event_id": event_id,
+            "event_title": event_title,
+        }
+        return json.dumps({
+            "status": "pending_confirmation",
+            "action": "delete",
+            "event_id": event_id,
+            "event_title": event_title,
+            "message": "Event deletion prepared. Present the details to the user and ask for confirmation.",
+        })
 
     @tool
     def find_free_slots(duration_minutes: str) -> str:
@@ -151,6 +180,7 @@ def get_calendar_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
         current_datetime,
         list_upcoming_events,
         prepare_calendar_event,
+        prepare_delete_event,
         confirm_action,
         cancel_action,
         find_free_slots,
@@ -159,14 +189,16 @@ def get_calendar_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
 
 CALENDAR_SYSTEM_PROMPT = (
     "You are a specialized Calendar Agent. You manage the user's Google Calendar: "
-    "listing upcoming events, creating events, and finding free time slots.\n"
-    "Use the calendar tools when the user asks about their schedule, wants to add an event, "
+    "listing upcoming events, creating events, deleting events, and finding free time slots.\n"
+    "Use the calendar tools when the user asks about their schedule, wants to add or remove an event, "
     "or needs a time suggestion.\n\n"
-    "IMPORTANT — Confirmation protocol for creating events:\n"
-    "1. When the user wants to create an event, call prepare_calendar_event FIRST.\n"
-    "2. Present the prepared event details to the user and ask them to confirm.\n"
-    "3. ONLY call confirm_action after the user explicitly agrees (e.g. 'yes', 'go ahead', 'confirm').\n"
-    "4. If the user declines or wants changes, call cancel_action and help them adjust.\n"
+    "IMPORTANT — Confirmation protocol for mutating actions (create or delete):\n"
+    "1. To CREATE an event, call prepare_calendar_event FIRST.\n"
+    "2. To DELETE an event, first call list_upcoming_events to find the event ID, "
+    "then call prepare_delete_event with the event_id and event_title.\n"
+    "3. Present the prepared action details to the user and ask them to confirm.\n"
+    "4. ONLY call confirm_action after the user explicitly agrees (e.g. 'yes', 'go ahead', 'confirm').\n"
+    "5. If the user declines or wants changes, call cancel_action and help them adjust.\n"
     "NEVER skip confirmation — always wait for the user's explicit approval before calling confirm_action."
 )
 
