@@ -19,6 +19,7 @@ from .calendar_tools import (
     create_calendar_event,
     delete_calendar_event,
     find_free_slots,
+    freebusy_query,
 )
 
 # ---------------------------------------------------------------------------
@@ -117,6 +118,16 @@ BIDI_AGENT_TOOLS = [
             s,
             duration_minutes=kw["duration_minutes"],
             search_range_days=kw.get("search_range_days", 7),
+        ),
+    },
+    {
+        "name": "freebusy_query",
+        "description": "Query busy and free periods in a time range.",
+        "parameters": ["time_min", "time_max"],
+        "runner": lambda s, **kw: freebusy_query(
+            s,
+            time_min=kw["time_min"],
+            time_max=kw["time_max"],
         ),
     },
 ]
