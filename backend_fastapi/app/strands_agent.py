@@ -176,6 +176,32 @@ def get_calendar_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
             print(f"[find_free_slots] Error: {e}")
             return json.dumps({"error": f"Calendar API error: {e}"})
 
+    @tool
+    def freebusy_query(time_min: str, time_max: str) -> str:
+        """Query busy and free periods in a time range using the Google Calendar
+        FreeBusy API. Returns all busy intervals and all free intervals between
+        time_min and time_max.
+
+        Args:
+            time_min: Start of the query window (ISO 8601 datetime string).
+            time_max: End of the query window (ISO 8601 datetime string).
+        """
+        from .calendar_tools import freebusy_query as _freebusy
+
+        service = get_calendar_service()
+        if service is None:
+            return json.dumps({"error": "Calendar not configured. Check secrets/token.json."})
+        try:
+            result = _freebusy(
+                service,
+                time_min=_ensure_tz(time_min),
+                time_max=_ensure_tz(time_max),
+            )
+            return json.dumps(result, default=str)
+        except Exception as e:
+            print(f"[freebusy_query] Error: {e}")
+            return json.dumps({"error": f"Calendar API error: {e}"})
+
     return [
         current_datetime,
         list_upcoming_events,
@@ -184,6 +210,7 @@ def get_calendar_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
         confirm_action,
         cancel_action,
         find_free_slots,
+        freebusy_query,
     ]
 
 
