@@ -14,6 +14,7 @@ __all__ = [
     "create_calendar_event",
     "delete_calendar_event",
     "find_free_slots",
+    "freebusy_query",
 ]
 
 from datetime import datetime, timezone, timedelta
@@ -205,4 +206,82 @@ def find_free_slots(
             add_slot(last_end)
 
     return free_slots
+
+
+def freebusy_query(
+    service: CalendarService,
+    time_min: str,
+    time_max: str,
+    calendar_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Query the Google Calendar FreeBusy API and return busy and free periods.
+
+    Unlike ``find_free_slots`` (which finds gaps of a specific duration), this
+    returns the full picture: every busy interval and every free interval within
+    the requested window, across one or more calendars.
+    """
+    if calendar_ids is None:
+        calendar_ids = [PRIMARY_CALENDAR_ID]
+
+    body = {
+        "timeMin": time_min,
+        "timeMax": time_max,
+        "items": [{"id": cid} for cid in calendar_ids],
+    }
+    response = service.freebusy().query(body=body).execute()
+
+    time_min_dt = datetime.fromisoformat(time_min.replace("Z", "+00:00"))
+    time_max_dt = datetime.fromisoformat(time_max.replace("Z", "+00:00"))
+
+    result: dict[str, Any] = {}
+    for cal_id in calendar_ids:
+        cal_data = response.get("calendars", {}).get(cal_id, {})
+        raw_busy = cal_data.get("busy", [])
+
+        busy_tuples: list[tuple[datetime, datetime]] = []
+        for b in raw_busy:
+            s, e = b.get("start"), b.get("end")
+            if s and e:
+                try:
+                    busy_tuples.append((
+                        datetime.fromisoformat(s.replace("Z", "+00:00")),
+                        datetime.fromisoformat(e.replace("Z", "+00:00")),
+                    ))
+                except (ValueError, TypeError):
+                    continue
+
+        busy_tuples.sort(key=lambda x: x[0])
+        merged: list[tuple[datetime, datetime]] = []
+        for start_dt, end_dt in busy_tuples:
+            if merged and start_dt <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end_dt))
+            else:
+                merged.append((start_dt, end_dt))
+
+        def _iso(dt: datetime) -> str:
+            return dt.isoformat().replace("+00:00", "Z")
+
+        busy_out = [
+            {"start": _to_local_friendly(_iso(s)), "end": _to_local_friendly(_iso(e))}
+            for s, e in merged
+        ]
+
+        free_out: list[dict[str, str]] = []
+        cursor = time_min_dt
+        for busy_start, busy_end in merged:
+            if cursor < busy_start:
+                free_out.append({
+                    "start": _to_local_friendly(_iso(cursor)),
+                    "end": _to_local_friendly(_iso(busy_start)),
+                })
+            cursor = max(cursor, busy_end)
+        if cursor < time_max_dt:
+            free_out.append({
+                "start": _to_local_friendly(_iso(cursor)),
+                "end": _to_local_friendly(_iso(time_max_dt)),
+            })
+
+        result[cal_id] = {"busy": busy_out, "free": free_out}
+
+    return result
 
