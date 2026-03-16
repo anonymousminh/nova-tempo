@@ -48,9 +48,12 @@ async def main() -> None:
     orchestrator_tools = get_orchestrator_tools(get_calendar_service)
 
     date_context = (
-        f"\nThe current date and time is {today_str}. "
+        f"\n## Current date and time\n"
+        f"Right now it is **{today_str}**. The current year is **{now.year}**.\n"
         f'When the user says "today" they mean {now.strftime("%Y-%m-%d")}, '
-        f'"tomorrow" means {(now + timedelta(days=1)).strftime("%Y-%m-%d")}.'
+        f'"tomorrow" means {(now + timedelta(days=1)).strftime("%Y-%m-%d")}.\n'
+        f"IMPORTANT: Always use the year {now.year} when creating events. "
+        f"Never use a past year."
     )
     agent = BidiAgent(
         model=model,
