@@ -14,7 +14,7 @@ const onboarding = document.getElementById("onboarding");
 const isLocalDev =
   window.location.hostname === "localhost" ||
   window.location.hostname === "127.0.0.1";
-const BACKEND_URL = isLocalDev ? "http://localhost:8000" : window.location.origin;
+const BACKEND_URL = isLocalDev ? "http://localhost:8000" : "https://nova-tempo.onrender.com";
 
 let novaUserId = localStorage.getItem("nova_user_id");
 if (!novaUserId) {
