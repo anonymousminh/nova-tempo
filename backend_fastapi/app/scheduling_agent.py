@@ -127,11 +127,26 @@ def get_scheduling_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
             if not isinstance(events, list) or len(events) == 0:
                 return json.dumps({"error": "events_json must be a non-empty JSON array."})
 
+            now = datetime.now().astimezone()
             prepared: list[dict[str, Any]] = []
             for ev in events:
+                tz_start = _ensure_tz(ev["start_time"])
+                try:
+                    if datetime.fromisoformat(tz_start) < now:
+                        return json.dumps({
+                            "status": "error",
+                            "warning": (
+                                f"Event '{ev['summary']}' has start_time "
+                                f"{ev['start_time']} which is in the past. "
+                                f"The current year is {now.year}. Fix the "
+                                "dates and call prepare_schedule again."
+                            ),
+                        })
+                except (ValueError, TypeError):
+                    pass
                 entry = {
                     "summary": ev["summary"],
-                    "start_time": _ensure_tz(ev["start_time"]),
+                    "start_time": tz_start,
                     "end_time": _ensure_tz(ev["end_time"]),
                     "description": ev.get("description"),
                 }
@@ -218,7 +233,8 @@ def get_scheduling_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
 
 SCHEDULING_SYSTEM_PROMPT = """\
 You are a Scheduling Agent — you take a list of tasks and find the best \
-times to put them on the user's calendar.
+times to put them on the user's calendar. The orchestrator has already \
+confirmed the plan with the user, so execute immediately.
 
 ## How it works
 
@@ -233,17 +249,17 @@ different hours.
 back-to-back scheduling leads to burnout.
    - **Deadlines**: if one was given, everything must fit before it.
 4. Call **prepare_schedule** with the full batch of events.
-5. Walk the user through the proposed schedule conversationally — \
-summarize it by day rather than reading a raw list. Ask if it looks good.
-6. On approval → call **confirm_schedule** to create everything.
-7. If they want changes → call **cancel_schedule** and help adjust.
+5. Immediately call **confirm_schedule** to create everything — the \
+orchestrator has already obtained user consent.
+6. Return the created schedule so the orchestrator can relay it to the user.
 
 ## Keep in mind
 - You only create time-block events — never modify or delete existing ones.
-- If the calendar is too packed to fit everything before a deadline, be \
-upfront about it. Propose the best schedule you can and explain what \
-didn't fit, so the user can prioritize.
+- If the calendar is too packed to fit everything before a deadline, report \
+the issue. Propose the best schedule you can and note what didn't fit.
 - Keep event titles short and clear; put extra detail in the description.
+- Do NOT ask for user confirmation — the orchestrator handles that. Just \
+execute and report results.
 """
 
 

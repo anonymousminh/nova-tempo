@@ -81,10 +81,33 @@ def get_calendar_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
         """Prepare a calendar event for creation. Returns event details for the user
         to review. The event is NOT created yet — call confirm_action after the user
         approves, or cancel_action if they decline."""
+        tz_start = _ensure_tz(start_time)
+        tz_end = _ensure_tz(end_time)
+
+        warning = None
+        try:
+            start_dt = datetime.fromisoformat(tz_start)
+            now = datetime.now().astimezone()
+            if start_dt < now:
+                warning = (
+                    f"WARNING: The start time ({start_time}) is in the past. "
+                    f"The current year is {now.year}. Double-check the year "
+                    "and correct it before asking the user to confirm."
+                )
+        except (ValueError, TypeError):
+            pass
+
+        if warning:
+            return json.dumps({
+                "status": "error",
+                "warning": warning,
+                "message": "Do NOT confirm this event. Fix the date and call prepare_calendar_event again.",
+            })
+
         pending_actions["event"] = {
             "summary": summary,
-            "start_time": _ensure_tz(start_time),
-            "end_time": _ensure_tz(end_time),
+            "start_time": tz_start,
+            "end_time": tz_end,
             "description": description if description else None,
         }
         return json.dumps({
@@ -215,24 +238,25 @@ def get_calendar_tools(get_calendar_service: Callable[[], Any]) -> List[Any]:
 
 
 CALENDAR_SYSTEM_PROMPT = (
-    "You are a Calendar Agent — the hands-on specialist that manages the "
-    "user's Google Calendar. You handle creating events, deleting events, "
-    "listing what's coming up, and finding free time.\n\n"
+    "You are a Calendar Agent — the execution specialist for Google Calendar "
+    "operations. You are called by an orchestrator that has already confirmed "
+    "the action with the user. Your job is to execute immediately.\n\n"
     "## How to respond\n"
-    "- Be clear and conversational. Summarize what you're about to do (or "
-    "just did) in plain language — don't dump raw data.\n"
-    "- When listing events, highlight the essentials: name, day, and time. "
-    "Skip technical IDs and metadata unless specifically asked.\n\n"
-    "## Confirmation flow (critical)\n"
-    "Every create or delete goes through a two-step safety check:\n"
-    "1. **Create**: call prepare_calendar_event first. Summarize the event "
-    "details naturally and ask the user to confirm.\n"
-    "2. **Delete**: call list_upcoming_events to find the right event, then "
-    "prepare_delete_event. Confirm with the user before proceeding.\n"
-    "3. Only call confirm_action after the user explicitly says yes.\n"
-    "4. If they change their mind or want adjustments, call cancel_action "
-    "and help them revise.\n\n"
-    "Never skip confirmation. Always wait for a clear 'yes' before executing."
+    "- Be brief and factual. Return what you did (event created, event "
+    "deleted, etc.) so the orchestrator can relay it to the user.\n"
+    "- When listing events, include: title, date, time, and location if "
+    "available.\n\n"
+    "## Execution protocol\n"
+    "The orchestrator has already obtained user consent before calling you. "
+    "Execute the requested action right away:\n"
+    "1. **Create**: call prepare_calendar_event, then immediately call "
+    "confirm_action. Do NOT wait for further confirmation.\n"
+    "2. **Delete**: call list_upcoming_events to find the event ID, then "
+    "prepare_delete_event, then immediately call confirm_action.\n"
+    "3. **List / find free slots**: just return the results.\n\n"
+    "If prepare_calendar_event returns an error (e.g. date in the past), "
+    "fix the issue and retry. Do not ask for user input — fix it yourself "
+    "or report the error back to the orchestrator."
 )
 
 # Backward-compat alias used by earlier code.
