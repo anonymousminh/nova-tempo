@@ -5,6 +5,11 @@
 const transcriptLog = document.getElementById("transcript-log");
 const voiceBtn = document.getElementById("voice-btn");
 const voiceStatus = document.getElementById("voice-status");
+const stateLabel = document.getElementById("state-label");
+const stateOrb = document.getElementById("state-orb");
+const micIcon = document.getElementById("mic-icon");
+const stopIcon = document.getElementById("stop-icon");
+const onboarding = document.getElementById("onboarding");
 
 const isLocalDev =
   window.location.hostname === "localhost" ||
@@ -32,9 +37,78 @@ socket.on("disconnect", (reason) => {
 });
 socket.on("connect_error", (err) => console.error("Socket error:", err.message));
 
+// ---- Agent state machine --------------------------------------------
+// idle → connecting → listening ⇄ thinking ⇄ speaking → idle
+
+const STATES = {
+  IDLE: "idle",
+  CONNECTING: "connecting",
+  LISTENING: "listening",
+  THINKING: "thinking",
+  SPEAKING: "speaking",
+};
+
+const STATE_STATUS = {
+  [STATES.IDLE]: "Tap the mic and start talking",
+  [STATES.CONNECTING]: "Connecting\u2026",
+  [STATES.LISTENING]: "Listening\u2026",
+  [STATES.THINKING]: "Thinking\u2026",
+  [STATES.SPEAKING]: "Speaking\u2026",
+};
+
+const STATE_LABELS = {
+  [STATES.IDLE]: "",
+  [STATES.CONNECTING]: "setting up",
+  [STATES.LISTENING]: "your turn",
+  [STATES.THINKING]: "processing",
+  [STATES.SPEAKING]: "nova tempo",
+};
+
+let agentState = STATES.IDLE;
+
+function setAgentState(newState) {
+  if (agentState === newState) return;
+  agentState = newState;
+
+  stateOrb.className = "state-" + newState;
+  voiceStatus.textContent = STATE_STATUS[newState];
+  stateLabel.textContent = STATE_LABELS[newState];
+
+  if (newState === STATES.IDLE) {
+    micIcon.classList.remove("hidden");
+    stopIcon.classList.add("hidden");
+  } else {
+    micIcon.classList.add("hidden");
+    stopIcon.classList.remove("hidden");
+  }
+}
+
+// Auto-transition: if thinking lasts long enough, show it. Reset when
+// agent starts speaking or user starts talking again.
+let thinkingTimer = null;
+
+function startThinkingTimer() {
+  clearThinkingTimer();
+  thinkingTimer = setTimeout(() => {
+    if (agentState === STATES.LISTENING) {
+      setAgentState(STATES.THINKING);
+    }
+  }, 600);
+}
+
+function clearThinkingTimer() {
+  if (thinkingTimer) {
+    clearTimeout(thinkingTimer);
+    thinkingTimer = null;
+  }
+}
+
 // ---- helpers --------------------------------------------------------
 
 function addMessage(text, cls) {
+  if (onboarding && !onboarding.classList.contains("hidden")) {
+    onboarding.classList.add("hidden");
+  }
   const el = document.createElement("div");
   el.className = "msg " + cls;
   el.textContent = text;
@@ -72,13 +146,12 @@ voiceBtn.addEventListener("click", () => {
 async function startVoice() {
   if (voiceActive) return;
 
-  voiceBtn.classList.add("connecting");
-  voiceStatus.textContent = "Connecting…";
+  setAgentState(STATES.CONNECTING);
 
   try {
     socket.emit("voice_start");
   } catch (err) {
-    voiceBtn.classList.remove("connecting");
+    setAgentState(STATES.IDLE);
     voiceStatus.textContent = "Error: " + err.message;
   }
 }
@@ -87,8 +160,8 @@ function stopVoice() {
   socket.emit("voice_stop");
   teardownAudio();
   voiceActive = false;
-  voiceBtn.classList.remove("active", "connecting");
-  voiceStatus.textContent = "Click the mic to start";
+  clearThinkingTimer();
+  setAgentState(STATES.IDLE);
 }
 
 // ---- Socket.IO voice events -----------------------------------------
@@ -98,13 +171,11 @@ socket.on("voice_started", async (config) => {
   try {
     await setupAudio(config);
     voiceActive = true;
-    voiceBtn.classList.remove("connecting");
-    voiceBtn.classList.add("active");
-    voiceStatus.textContent = "Listening — click mic to stop";
+    setAgentState(STATES.LISTENING);
   } catch (err) {
     console.error("Audio setup failed:", err);
     voiceStatus.textContent = "Mic error: " + err.message;
-    voiceBtn.classList.remove("connecting");
+    setAgentState(STATES.IDLE);
     socket.emit("voice_stop");
   }
 });
@@ -112,25 +183,40 @@ socket.on("voice_started", async (config) => {
 socket.on("voice_stopped", () => {
   teardownAudio();
   voiceActive = false;
-  voiceBtn.classList.remove("active", "connecting");
-  voiceStatus.textContent = "Click the mic to start";
+  clearThinkingTimer();
+  setAgentState(STATES.IDLE);
 });
 
 socket.on("voice_audio_out", (data) => {
   if (!voiceActive) return;
+  if (agentState !== STATES.SPEAKING) {
+    clearThinkingTimer();
+    setAgentState(STATES.SPEAKING);
+  }
   playAudioChunk(data.audio, data.sampleRate);
 });
 
 socket.on("voice_transcript", (data) => {
   if (data.role === "user") {
+    if (agentState === STATES.SPEAKING || agentState === STATES.THINKING) {
+      setAgentState(STATES.LISTENING);
+    }
+    clearThinkingTimer();
+
     if (!userTranscriptEl) {
       userTranscriptEl = addMessage("", "user");
     }
     userTranscriptEl.textContent = data.currentTranscript || data.text;
     if (data.isFinal) {
       userTranscriptEl = null;
+      startThinkingTimer();
     }
   } else {
+    clearThinkingTimer();
+    if (agentState !== STATES.SPEAKING) {
+      setAgentState(STATES.SPEAKING);
+    }
+
     if (!agentTranscriptEl) {
       agentTranscriptEl = addMessage("", "agent streaming");
     }
@@ -143,6 +229,7 @@ socket.on("voice_transcript", (data) => {
     if (data.isFinal) {
       agentTranscriptEl.classList.remove("streaming");
       agentTranscriptEl = null;
+      if (voiceActive) setAgentState(STATES.LISTENING);
     }
   }
 });
@@ -153,6 +240,7 @@ socket.on("voice_interrupted", () => {
     agentTranscriptEl = null;
   }
   clearPlaybackQueue();
+  if (voiceActive) setAgentState(STATES.LISTENING);
 });
 
 socket.on("voice_error", (data) => {
