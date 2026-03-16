@@ -62,6 +62,14 @@ class VoiceSession:
         if self._agent is not None:
             await self.stop()
 
+        # Eagerly initialize the calendar service (and refresh the OAuth
+        # token if expired) BEFORE starting the BidiAgent.  The token
+        # refresh is a synchronous blocking HTTP call — doing it here
+        # avoids blocking the event loop while the real-time audio
+        # streams are active.
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, get_calendar_service)
+
         model = BidiNovaSonicModel(
             model_id="amazon.nova-sonic-v1:0",
             provider_config={"audio": {"voice": "tiffany"}},
@@ -73,9 +81,12 @@ class VoiceSession:
         now = datetime.now().astimezone()
         today_str = now.strftime("%A %B %-d, %Y, %-I:%M %p")
         date_context = (
-            f"\nThe current date and time is {today_str}. "
+            f"\n## Current date and time\n"
+            f"Right now it is **{today_str}**. The current year is **{now.year}**.\n"
             f'When the user says "today" they mean {now.strftime("%Y-%m-%d")}, '
-            f'"tomorrow" means {(now + timedelta(days=1)).strftime("%Y-%m-%d")}.'
+            f'"tomorrow" means {(now + timedelta(days=1)).strftime("%Y-%m-%d")}.\n'
+            f"IMPORTANT: Always use the year {now.year} when creating events. "
+            f"Never use a past year."
         )
 
         session_manager = self._build_memory_session_manager()
@@ -156,20 +167,22 @@ class VoiceSession:
                 pass
         self._receive_task = None
 
-        if self._agent is not None:
+        agent = self._agent
+
+        if self._memory_session_manager is not None and agent is not None:
             try:
-                await self._agent.stop()
+                self._memory_session_manager.sync_bidi_agent(agent)
+                logger.info("Memory session synced and released")
+            except Exception as e:
+                logger.warning("Error syncing memory session: %s", e)
+            self._memory_session_manager = None
+
+        if agent is not None:
+            try:
+                await agent.stop()
             except Exception as e:
                 logger.warning("Error stopping BidiAgent: %s", e)
         self._agent = None
-
-        if self._memory_session_manager is not None:
-            try:
-                self._memory_session_manager.close()
-                logger.info("Memory session flushed and closed")
-            except Exception as e:
-                logger.warning("Error closing memory session: %s", e)
-            self._memory_session_manager = None
 
     async def _receive_loop(self) -> None:
         """Background task: read BidiAgent output events and emit via Socket.IO."""
