@@ -127,6 +127,7 @@ def create_availability_agent(get_calendar_service: Callable[[], Any]) -> Agent:
     tools = get_availability_tools(get_calendar_service)
     return Agent(
         name="AvailabilityAgent",
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
         system_prompt=AVAILABILITY_SYSTEM_PROMPT,
         tools=tools,
     )

@@ -177,6 +177,7 @@ def create_conflict_resolution_agent(
     tools = get_conflict_resolution_tools(get_calendar_service)
     return Agent(
         name="ConflictResolutionAgent",
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
         system_prompt=CONFLICT_RESOLUTION_SYSTEM_PROMPT,
         tools=tools,
     )

@@ -10,9 +10,11 @@ and appending it to the orchestrator's tools list.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Optional
 
 from strands import Agent, tool
+
+ToolInvokeHook = Callable[[str, str], None]  # (tool_name, "start"|"end")
 
 from .strands_agent import create_calendar_agent
 from .availability_agent import create_availability_agent
@@ -126,6 +128,7 @@ wants them.
 # ---------------------------------------------------------------------------
 def _make_calendar_agent_tool(
     get_calendar_service: Callable[[], Any],
+    on_tool_invoke: Optional[ToolInvokeHook] = None,
 ):
     """Create a ``@tool``-wrapped CalendarAgent.
 
@@ -155,9 +158,15 @@ def _make_calendar_agent_tool(
         Returns:
             The Calendar Agent's response.
         """
-        agent = _get_or_create()
-        result = agent(task)
-        return str(result)
+        if on_tool_invoke:
+            on_tool_invoke("calendar_agent", "start")
+        try:
+            agent = _get_or_create()
+            result = agent(task)
+            return str(result)
+        finally:
+            if on_tool_invoke:
+                on_tool_invoke("calendar_agent", "end")
 
     return calendar_agent
 
@@ -167,6 +176,7 @@ def _make_calendar_agent_tool(
 # ---------------------------------------------------------------------------
 def _make_availability_agent_tool(
     get_calendar_service: Callable[[], Any],
+    on_tool_invoke: Optional[ToolInvokeHook] = None,
 ):
     """Create a ``@tool``-wrapped AvailabilityAgent.
 
@@ -197,9 +207,15 @@ def _make_availability_agent_tool(
         Returns:
             The Availability Agent's response.
         """
-        agent = _get_or_create()
-        result = agent(task)
-        return str(result)
+        if on_tool_invoke:
+            on_tool_invoke("availability_agent", "start")
+        try:
+            agent = _get_or_create()
+            result = agent(task)
+            return str(result)
+        finally:
+            if on_tool_invoke:
+                on_tool_invoke("availability_agent", "end")
 
     return availability_agent
 
@@ -209,6 +225,7 @@ def _make_availability_agent_tool(
 # ---------------------------------------------------------------------------
 def _make_conflict_resolution_agent_tool(
     get_calendar_service: Callable[[], Any],
+    on_tool_invoke: Optional[ToolInvokeHook] = None,
 ):
     """Create a ``@tool``-wrapped ConflictResolutionAgent.
 
@@ -239,9 +256,15 @@ def _make_conflict_resolution_agent_tool(
             Whether a conflict exists, details of conflicting events,
             and suggested alternative times if applicable.
         """
-        agent = _get_or_create()
-        result = agent(task)
-        return str(result)
+        if on_tool_invoke:
+            on_tool_invoke("conflict_resolution_agent", "start")
+        try:
+            agent = _get_or_create()
+            result = agent(task)
+            return str(result)
+        finally:
+            if on_tool_invoke:
+                on_tool_invoke("conflict_resolution_agent", "end")
 
     return conflict_resolution_agent
 
@@ -249,7 +272,9 @@ def _make_conflict_resolution_agent_tool(
 # ---------------------------------------------------------------------------
 # Helper: wrap a PlanningAgent as a @tool
 # ---------------------------------------------------------------------------
-def _make_planning_agent_tool():
+def _make_planning_agent_tool(
+    on_tool_invoke: Optional[ToolInvokeHook] = None,
+):
     """Create a ``@tool``-wrapped PlanningAgent.
 
     Lazily created on first call and reused so conversation memory
@@ -280,9 +305,15 @@ def _make_planning_agent_tool():
         Returns:
             A structured task plan with titles, durations, and priorities.
         """
-        agent = _get_or_create()
-        result = agent(task)
-        return str(result)
+        if on_tool_invoke:
+            on_tool_invoke("planning_agent", "start")
+        try:
+            agent = _get_or_create()
+            result = agent(task)
+            return str(result)
+        finally:
+            if on_tool_invoke:
+                on_tool_invoke("planning_agent", "end")
 
     return planning_agent
 
@@ -292,6 +323,7 @@ def _make_planning_agent_tool():
 # ---------------------------------------------------------------------------
 def _make_scheduling_agent_tool(
     get_calendar_service: Callable[[], Any],
+    on_tool_invoke: Optional[ToolInvokeHook] = None,
 ):
     """Create a ``@tool``-wrapped SchedulingAgent.
 
@@ -322,9 +354,15 @@ def _make_scheduling_agent_tool(
         Returns:
             The proposed or confirmed schedule details.
         """
-        agent = _get_or_create()
-        result = agent(task)
-        return str(result)
+        if on_tool_invoke:
+            on_tool_invoke("scheduling_agent", "start")
+        try:
+            agent = _get_or_create()
+            result = agent(task)
+            return str(result)
+        finally:
+            if on_tool_invoke:
+                on_tool_invoke("scheduling_agent", "end")
 
     return scheduling_agent
 
@@ -363,6 +401,7 @@ def create_orchestrator_agent(
 
     return Agent(
         name="OrchestratorAgent",
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT + date_context,
         tools=[cal_tool, avail_tool, conflict_tool, plan_tool, sched_tool],
     )
@@ -370,16 +409,22 @@ def create_orchestrator_agent(
 
 def get_orchestrator_tools(
     get_calendar_service: Callable[[], Any],
+    on_tool_invoke: Optional[ToolInvokeHook] = None,
 ) -> List[Any]:
     """Return orchestrator-level tools for use with BidiAgent.
 
     Wraps all sub-agents as ``@tool`` functions so the BidiAgent can
     delegate tasks without holding all sub-agent tools directly.
+
+    Args:
+        get_calendar_service: Factory for the Google Calendar API service.
+        on_tool_invoke: Optional callback ``(tool_name, "start"|"end")``
+            fired around each sub-agent invocation for latency tracking.
     """
     return [
-        _make_calendar_agent_tool(get_calendar_service),
-        _make_availability_agent_tool(get_calendar_service),
-        _make_conflict_resolution_agent_tool(get_calendar_service),
-        _make_planning_agent_tool(),
-        _make_scheduling_agent_tool(get_calendar_service),
+        _make_calendar_agent_tool(get_calendar_service, on_tool_invoke),
+        _make_availability_agent_tool(get_calendar_service, on_tool_invoke),
+        _make_conflict_resolution_agent_tool(get_calendar_service, on_tool_invoke),
+        _make_planning_agent_tool(on_tool_invoke),
+        _make_scheduling_agent_tool(get_calendar_service, on_tool_invoke),
     ]

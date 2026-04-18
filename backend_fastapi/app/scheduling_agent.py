@@ -270,6 +270,7 @@ def create_scheduling_agent(
     tools = get_scheduling_tools(get_calendar_service)
     return Agent(
         name="SchedulingAgent",
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
         system_prompt=SCHEDULING_SYSTEM_PROMPT,
         tools=tools,
     )

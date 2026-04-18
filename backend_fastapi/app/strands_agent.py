@@ -268,6 +268,7 @@ def create_calendar_agent(get_calendar_service: Callable[[], Any]) -> Agent:
     tools = get_calendar_tools(get_calendar_service)
     return Agent(
         name="CalendarAgent",
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
         system_prompt=CALENDAR_SYSTEM_PROMPT,
         tools=tools,
     )

@@ -70,6 +70,7 @@ def create_planning_agent() -> Agent:
     tools = get_planning_tools()
     return Agent(
         name="PlanningAgent",
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
         system_prompt=PLANNING_SYSTEM_PROMPT,
         tools=tools,
     )

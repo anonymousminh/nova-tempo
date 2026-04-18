@@ -30,6 +30,7 @@ from strands.experimental.bidi.types.events import (
 )
 
 from .calendar_auth import get_calendar_service
+from .latency_tracker import LatencyTracker
 from .orchestrator import get_orchestrator_tools, ORCHESTRATOR_SYSTEM_PROMPT
 
 try:
@@ -56,6 +57,7 @@ class VoiceSession:
         self._agent: BidiAgent | None = None
         self._receive_task: asyncio.Task | None = None
         self._memory_session_manager = None
+        self._latency = LatencyTracker()
 
     async def start(self) -> dict[str, Any]:
         """Create and start the BidiAgent. Returns audio config for the client."""
@@ -76,7 +78,15 @@ class VoiceSession:
             client_config={"region": "us-east-1"},
         )
 
-        orchestrator_tools = get_orchestrator_tools(get_calendar_service)
+        def _on_tool_invoke(name: str, phase: str) -> None:
+            if phase == "start":
+                self._latency.mark_tool_start(name)
+            elif phase == "end":
+                self._latency.mark_tool_end()
+
+        orchestrator_tools = get_orchestrator_tools(
+            get_calendar_service, on_tool_invoke=_on_tool_invoke
+        )
 
         now = datetime.now().astimezone()
         today_str = now.strftime("%A %B %-d, %Y, %-I:%M %p")
@@ -149,6 +159,7 @@ class VoiceSession:
         """Forward a base64 audio chunk from the browser to the BidiAgent."""
         if self._agent is None or not self._agent._started:
             return
+        self._latency.mark_audio_in()
         event = BidiAudioInputEvent(
             audio=audio_b64,
             format=self._audio_format,
@@ -159,6 +170,8 @@ class VoiceSession:
 
     async def stop(self) -> None:
         """Stop the BidiAgent and clean up."""
+        await self._emit_latency()
+
         if self._receive_task and not self._receive_task.done():
             self._receive_task.cancel()
             try:
@@ -200,6 +213,7 @@ class VoiceSession:
 
     async def _handle_output(self, event: BidiOutputEvent) -> None:
         if isinstance(event, BidiAudioStreamEvent):
+            self._latency.mark_assistant_audio()
             await self._sio.emit(
                 "voice_audio_out",
                 {
@@ -210,6 +224,12 @@ class VoiceSession:
                 to=self._sid,
             )
         elif isinstance(event, BidiTranscriptStreamEvent):
+            if event.role == "user":
+                self._latency.mark_user_transcript(event.is_final)
+            elif event.role == "assistant":
+                self._latency.mark_assistant_transcript(event.is_final)
+                if event.is_final:
+                    await self._emit_latency()
             await self._sio.emit(
                 "voice_transcript",
                 {
@@ -221,17 +241,26 @@ class VoiceSession:
                 to=self._sid,
             )
         elif isinstance(event, BidiInterruptionEvent):
+            await self._emit_latency()
             await self._sio.emit(
                 "voice_interrupted",
                 {"reason": event.reason},
                 to=self._sid,
             )
         elif isinstance(event, BidiErrorEvent):
+            await self._emit_latency()
             await self._sio.emit(
                 "voice_error",
                 {"error": event.message},
                 to=self._sid,
             )
+
+    async def _emit_latency(self) -> None:
+        """Collect and emit per-turn latency metrics via Socket.IO."""
+        metrics = self._latency.collect()
+        if metrics:
+            logger.info("Turn latency: %s", metrics)
+            await self._sio.emit("voice_latency", metrics, to=self._sid)
 
 
 # ---- Per-client session store ------------------------------------------------
